@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.optim import Adam
 from sklearn.utils.class_weight import compute_class_weight as classweight
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, r2_score
 from sklearn.model_selection import train_test_split
 import numpy as np
 from torch.nn import CrossEntropyLoss
@@ -25,9 +25,10 @@ class trainer:
         self.tracker = {'train_tracker':[],'val_tracker':[]}
         print(self.y_train)
 
-        weights = classweight(class_weight="balanced",classes=np.arange(n_classes),y=self.y_train)
-        class_weights = torch.FloatTensor(weights).to(torch.device("mps"))
-        self.loss_func = CrossEntropyLoss(weight=class_weights)
+        # weights = classweight(class_weight="balanced",classes=np.arange(n_classes),y=self.y_train)
+        # class_weights = torch.FloatTensor(weights).to(torch.device("mps"))
+        # self.loss_func = CrossEntropyLoss(weight=class_weights)
+        self.loss_func = CrossEntropyLoss()
 
     def get_source_data(self, nExp):        
         files = os.listdir("/Users/rikugen/repo/CausalEEG/NMED-T")
@@ -56,7 +57,7 @@ class trainer:
                 if t+window_size > downsampled.shape[1]:
                     continue
                 trial.append(downsampled[:,t:t+window_size])
-                label.append(int(behave[int(trigger.strip("data")) - 21][nExp][1] > 5))
+                label.append(behave[int(trigger.strip("data")) - 21][nExp] / 10.0)
         trial = np.array(trial)
         label = np.array(label)
 
@@ -135,15 +136,15 @@ class trainer:
                 self.Model.train()
                 pred = self.Model(data.float().to(torch.device("mps")))
                 self.optimizer.zero_grad()
-                train_loss = self.loss_func(pred, target.to(torch.device("mps")))
+                train_loss = self.loss_func(pred, target.float().to(torch.device("mps")))
                 #print(pred.shape)
                 # print(target.shape)
 
-                _, predicted = torch.max(pred.float().t(), dim=0)
-                label =  target.to(torch.device("mps"))
+                # _, predicted = torch.max(pred.float().t(), dim=0)
+                label =  target.float().to(torch.device("mps"))
                 # _, label = torch.max(target.float().t(), dim=0)
-                acc = acc + float((predicted == label).cpu().numpy().astype(int).sum()) 
-                total = total + batch_size
+                acc = acc + r2_score(pred.detach().cpu().numpy(), label.cpu().numpy())
+                total = total + 1.0
                 train_loss.backward()       
                 self.optimizer.step()
                 batch_train_loss.append(train_loss)
@@ -156,12 +157,12 @@ class trainer:
             with torch.no_grad():
                 for data, target in valloader: 
                     pred = self.Model(data.float().to(torch.device("mps")))
-                    val_loss = self.loss_func(pred, target.to(torch.device("mps")))
-                    _, predicted = torch.max(pred.float().t(), dim=0)
+                    val_loss = self.loss_func(pred, target.float().to(torch.device("mps")))
+                    # _, predicted = torch.max(pred.float().t(), dim=0)
                     # _, label = torch.max(target.float().t(), dim=0)
-                    label =  target.to(torch.device("mps"))
-                    acc = acc + float((predicted == label).cpu().numpy().astype(int).sum()) 
-                    total = total + batch_size
+                    label =  target.float().to(torch.device("mps"))
+                    acc = acc + r2_score(pred.detach().cpu().numpy(), label.cpu().numpy())
+                    total = total + 1.0
                     batch_val_loss.append(val_loss)
             val_acc = acc / total
   
